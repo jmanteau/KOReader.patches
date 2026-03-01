@@ -4,9 +4,13 @@ A curated set of [KOReader](https://koreader.rocks/) user patches for the defaul
 
 It is based on the work of several KOReader community contributors with bug fixes, performance improvement, a unified configuration surface, new features and aesthetic adjustments.
 
-![image-20260301200651704](README.assets/image-20260301200651704.png)
+<p align="center">
+  <img src="README.assets/image-20260301200651704.png" alt="Mosaic view screenshot">
+</p>
 
-![image-20260301201648557](README.assets/image-20260301201648557.png)
+<p align="center">
+  <img src="README.assets/image-20260301201648557.png" alt="Mosaic view screenshot">
+</p>
 
 
 
@@ -33,13 +37,17 @@ Folders display a cover image sourced from `.cover.{jpg,jpeg,png,webp,gif}` insi
 - **"NEW" badge** -- top-left corner. Shown for books added within a configurable number of days (default 30).
 - **Status dogear** -- bottom-right corner (Reading, Completed, On-Hold)
 
-![image-20260301201441579](README.assets/image-20260301201441579.png)
+<p align="center">
+  <img src="README.assets/image-20260301201441579.png" alt="Overlay badges screenshot">
+</p>
 
 #### Automatic series grouping
 
 When enabled (toggle: "Group book series into folders" in file browser settings), books sharing the same `series` metadata field (`calibre:series` / `belongs-to-collection`) are collapsed into a virtual folder. Tapping a series folder opens a sub-view sorted by `series_index`. Series metadata is extracted in the background. If every book in a directory belongs to the same series, grouping is skipped. Single-book series are unwrapped back to regular entries.
 
-![image-20260301201030363](README.assets/image-20260301201030363.png)
+<p align="center">
+  <img src="README.assets/image-20260301201030363.png" alt="Series grouping screenshot">
+</p>
 
 ### Disable CoverBrowser Widgets (`2--disable-all-CB-widgets.lua`)
 
