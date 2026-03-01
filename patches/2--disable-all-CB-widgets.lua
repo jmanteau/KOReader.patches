@@ -7,6 +7,8 @@ This patch disables:
 ]]
 --
 
+local ok, err = pcall(function()
+
 local userpatch = require("userpatch")
 
 local function patchDisableUIElements(plugin)
@@ -62,3 +64,9 @@ local function patchDisableUIElements(plugin)
 end
 
 userpatch.registerPatchPluginFunc("coverbrowser", patchDisableUIElements)
+
+end)
+if not ok then
+    local logger = require("logger")
+    logger.warn("PATCH FAILED: 2--disable-all-CB-widgets:", tostring(err))
+end

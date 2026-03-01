@@ -61,6 +61,8 @@ Requires a double-tap to open books in the file browser, preventing accidental o
 
 ## Installation
 
+⚠ For those running KOReader on Android, please use the releases provided on the [KOReader Github](https://github.com/koreader/koreader/releases). FDroid releases doesn't support user patches.
+
 ### On device
 
 1. Copy all the `.lua` files to `koreader/patches/` on your e-reader.

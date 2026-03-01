@@ -3,6 +3,8 @@
 -- Configurable double-tap timeout in settings menu
 -- Supports: FileManager, CoverBrowser plugin, and Project Title plugin
 
+local ok, err = pcall(function()
+
 local FileManager = require("apps/filemanager/filemanager")
 local FileManagerMenu = require("apps/filemanager/filemanagermenu")
 local FileManagerMenuOrder = require("ui/elements/filemanager_menu_order")
@@ -188,4 +190,10 @@ function FileManagerMenu:setUpdateItemTable()
     }
 
     orig_FileManagerMenu_setUpdateItemTable(self)
+end
+
+end)
+if not ok then
+    local logger = require("logger")
+    logger.warn("PATCH FAILED: 2-browser-double-tap:", tostring(err))
 end

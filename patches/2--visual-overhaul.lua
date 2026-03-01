@@ -3,6 +3,8 @@
      Merges: 2--covers.lua, 2-cover-overlays.lua, 2-automatic-book-series.lua ]]
 --
 
+local ok, err = pcall(function()
+
 local BD = require("ui/bidi")
 local Blitbuffer = require("ffi/blitbuffer")
 local Device = require("device")
@@ -16,7 +18,7 @@ local Screen = Device.screen
 local logger = require("logger")
 
 --========================== [[Debug]] ==================================================
-local DEBUG_ICONS = true  -- set false to silence custom-icon diagnostics
+local DEBUG_ICONS = false  -- set false to silence custom-icon diagnostics
 --=======================================================================================
 
 --========================== [[Cover preferences]] ======================================
@@ -71,6 +73,12 @@ local title_cfg = {
     card_gap = 10,
 }
 
+--========================== [[Focus border preferences]] =================================
+local focus_cfg = {
+    border_width = 12,
+    color = Blitbuffer.COLOR_BLACK,
+}
+
 --========================== [[Progress bar preferences]] ===============================
 local bar_cfg = {
     H = Screen:scaleBySize(9),                              -- bar height
@@ -106,16 +114,10 @@ local Folder = {
 --========================== [[New badge preferences]] ================================
 local new_badge_cfg = {
     max_age_days = 30,
-    text = "NEW",
-    font_size = 10,
-    text_color = Blitbuffer.COLOR_WHITE,
-    background_color = Blitbuffer.COLOR_BLACK,
-    border_color = Blitbuffer.COLOR_BLACK,
-    border_thickness = 1,
-    border_radius = 4,
-    padding = 2,
-    inset_x = 4,
-    inset_y = 4,
+    badge_w = 55,
+    badge_h = 30,
+    inset_x = -10,
+    inset_y = 2,
 }
 
 -- ============================================================================
@@ -440,7 +442,6 @@ local function patchVisualOverhaul(plugin)
             end
 
             debug.setupvalue(MosaicMenuItem.update, n, StretchingImageWidget)
-            logger.info("Aspect ratio control applied successfully")
         end
     end
 
@@ -952,6 +953,10 @@ local function patchVisualOverhaul(plugin)
                         self._folder_meta_widget:paintTo(bb, meta_x, meta_y)
                     end
                 end
+                if self._focused then
+                    local bw = Screen:scaleBySize(focus_cfg.border_width)
+                    bb:paintRect(x, y + self.height - bw, self.width, bw, focus_cfg.color)
+                end
                 return
             end
         end
@@ -1194,29 +1199,19 @@ local function patchVisualOverhaul(plugin)
 
         -- [overlays] New badge (top-left, recently added unread books)
         if self._is_new then
-            local nfont_size = Screen:scaleBySize(new_badge_cfg.font_size)
-            local new_text = TextWidget:new({
-                text = new_badge_cfg.text,
-                face = Font:getFace("cfont", nfont_size),
-                fgcolor = new_badge_cfg.text_color,
-                bold = true,
-            })
-            local new_badge = FrameContainer:new({
-                radius = Screen:scaleBySize(new_badge_cfg.border_radius),
-                color = new_badge_cfg.border_color,
-                bordersize = Screen:scaleBySize(new_badge_cfg.border_thickness),
-                background = new_badge_cfg.background_color,
-                padding = Screen:scaleBySize(new_badge_cfg.padding),
-                margin = 0,
-                new_text,
-            })
+            local NBADGE_W = Screen:scaleBySize(new_badge_cfg.badge_w)
+            local NBADGE_H = Screen:scaleBySize(new_badge_cfg.badge_h)
+
+            local new_badge_icon = IconWidget:new({ icon = "new", alpha = true })
+            new_badge_icon.width = NBADGE_W
+            new_badge_icon.height = NBADGE_H
 
             local cover_left = x + math.floor((self.width - fw) / 2)
             local cover_top = y + math.floor((cover_area_h - fh) / 2)
             local ninset_x = Screen:scaleBySize(new_badge_cfg.inset_x)
             local ninset_y = Screen:scaleBySize(new_badge_cfg.inset_y)
 
-            new_badge:paintTo(bb, cover_left + ninset_x, cover_top + ninset_y)
+            new_badge_icon:paintTo(bb, cover_left + ninset_x, cover_top + ninset_y)
         end
 
         -- [title] Paint title and meta text below the cover image
@@ -1235,6 +1230,23 @@ local function patchVisualOverhaul(plugin)
             end
         end
 
+        if self._focused then
+            local bw = Screen:scaleBySize(focus_cfg.border_width)
+            bb:paintRect(x, y + self.height - bw, self.width, bw, focus_cfg.color)
+        end
+
+    end
+
+    function MosaicMenuItem:onFocus()
+        self._focused = true
+        self._underline_container.color = Blitbuffer.COLOR_WHITE
+        return true
+    end
+
+    function MosaicMenuItem:onUnfocus()
+        self._focused = false
+        self._underline_container.color = Blitbuffer.COLOR_WHITE
+        return true
     end
 
     -- MosaicMenuItem.free
@@ -1676,3 +1688,9 @@ local function patchVisualOverhaul(plugin)
 end
 
 userpatch.registerPatchPluginFunc("coverbrowser", patchVisualOverhaul)
+
+end)
+if not ok then
+    local logger = require("logger")
+    logger.warn("PATCH FAILED: 2--visual-overhaul:", tostring(err))
+end

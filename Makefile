@@ -4,15 +4,15 @@ include .env
 
 EMULATOR_KOREADER := $(patsubst %/patches,%,$(EMULATOR_PATCHES))
 
-.PHONY: help run run-bw link-patches reset
+.PHONY: help run run-bw link-patches link-icons reset
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(firstword $(MAKEFILE_LIST)) | awk -F ':.*## ' '{printf "  %-15s %s\n", $$1, $$2}'
 
-run: link-patches ## Run emulator in color
+run: link-patches link-icons ## Run emulator in color
 	$(KODEV) run -v $(LIBRARY)
 
-run-bw: link-patches ## Run emulator in grayscale (Kobo e-ink simulation)
+run-bw: link-patches link-icons ## Run emulator in grayscale (Kobo e-ink simulation)
 	EMULATE_BW_SCREEN=1 EMULATE_BB_TYPE=BB8 $(KODEV) run -v $(LIBRARY)
 
 link-patches: ## Symlink emulator patches dir to this repo's patches/
@@ -41,6 +41,31 @@ endif
 	@rm -f "$(EMULATOR_PATCHES)"
 	@ln -s "$(CURDIR)/patches" "$(EMULATOR_PATCHES)"
 	@echo "Symlinked $(EMULATOR_PATCHES) -> $(CURDIR)/patches"
+
+EMULATOR_ICONS := $(EMULATOR_KOREADER)/icons
+
+link-icons: ## Symlink emulator icons dir to this repo's icons/
+ifndef EMULATOR_PATCHES
+	$(error EMULATOR_PATCHES is not set -- add it to .env or pass on the command line)
+endif
+	@if [ -L icons ]; then \
+		echo "ERROR: ./icons is a symlink (old reversed setup). Remove it and restore the real directory." >&2; \
+		exit 1; \
+	fi
+	@if [ ! -d icons ]; then \
+		echo "ERROR: ./icons directory not found -- this repo's source-of-truth is missing." >&2; \
+		exit 1; \
+	fi
+	@if [ -d "$(EMULATOR_ICONS)" ] && [ ! -L "$(EMULATOR_ICONS)" ]; then \
+		echo "ERROR: $(EMULATOR_ICONS) is a real directory -- refusing to delete it. Remove manually if intended." >&2; \
+		exit 1; \
+	fi
+	@if [ -L "$(EMULATOR_ICONS)" ] && [ "$$(readlink "$(EMULATOR_ICONS)")" = "$(CURDIR)/icons" ]; then \
+		exit 0; \
+	fi
+	@rm -f "$(EMULATOR_ICONS)"
+	@ln -s "$(CURDIR)/icons" "$(EMULATOR_ICONS)"
+	@echo "Symlinked $(EMULATOR_ICONS) -> $(CURDIR)/icons"
 
 reset: ## Remove all KOReader state from the emulator (stats, settings, cache, history, sidecars)
 ifndef EMULATOR_PATCHES
