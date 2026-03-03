@@ -22,11 +22,17 @@ Consolidated patch that replaces the default mosaic cover appearance. Merges the
 
 #### Cover rendering
 
-Stretched covers with aspect ratio control . Set `fill = true` to ignore the ratio and fill the entire cell. Rounded corners are drawn via four SVG overlays . A thin border  frames every cover. Results are memoised in an cache (2000 entries) to avoid redundant rebuilds during scrolling.
+Stretched covers with aspect ratio control . Set `fill = true` to ignore the ratio and fill the entire cell. Rounded corners are drawn via four SVG overlays . A thin border  frames every cover. Results are memoised in an cache (2000 entries) to avoid redundant rebuilds during scrolling. 
+
+Sidecar cover images (image files (jpg/jpeg/png/webp/gif) sitting next to a book file with the same basename (e.g. `book.jpg` next to `book.epub`) ) are automatically used as the book's cover and hidden from the file listing.
 
 #### Folder covers
 
 Folders display a cover image sourced from `.cover.{jpg,jpeg,png,webp,gif}` inside the folder. If no `.cover` file exists, the first book with a cached cover is used instead. A capitalized folder name is rendered centered over the cover (toggleable via the settings menu). A file-count badge (rounded pill) appears in the bottom-right corner.
+
+#### Title strip
+
+The title strip below each cover shows the book title. When both `series` and `authors` metadata are present, the strip renders series info and author on two lines beneath the title. Folder title strips for series groups show the author name instead of a book count.
 
 #### Overlay badges
 
@@ -43,7 +49,7 @@ Folders display a cover image sourced from `.cover.{jpg,jpeg,png,webp,gif}` insi
 
 #### Automatic series grouping
 
-When enabled (toggle: "Group book series into folders" in file browser settings), books sharing the same `series` metadata field (`calibre:series` / `belongs-to-collection`) are collapsed into a virtual folder. Tapping a series folder opens a sub-view sorted by `series_index`. Series metadata is extracted in the background. If every book in a directory belongs to the same series, grouping is skipped. Single-book series are unwrapped back to regular entries.
+When enabled (toggle: "Group book series into folders" in file browser settings), books sharing the same `series` metadata field (`calibre:series` / `belongs-to-collection`) are collapsed into a virtual folder. Tapping a series folder opens a sub-view sorted by `series_index`. Series metadata is extracted in the background. If every book in a directory belongs to the same series, grouping is skipped. Series containing only one book are not grouped.
 
 <p align="center">
   <img src="README.assets/image-20260301201030363.png" alt="Series grouping screenshot">
@@ -144,13 +150,14 @@ All tunables are at the top of `2--visual-overhaul.lua`.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `font_size` | `0.95` | Relative font size (0 to 1) |
+| `font_size` | `10` | Font size in points (passed to Font:getFace) |
 | `text_color` | `COLOR_WHITE` | Badge text colour |
 | `border_thickness` | `2` | Border width (0 to 5) |
 | `border_corner_radius` | `12` | Corner radius (0 to 20) |
 | `border_color` | `COLOR_DARK_GRAY` | Border colour |
 | `background_color` | `COLOR_GRAY_3` | Badge background colour |
-| `move_from_border` | `8` | Inset distance from cover edge |
+| `inset_x` | `4` (scaled) | Horizontal inset from cover edge |
+| `inset_y` | `8` (scaled) | Vertical inset from cover edge |
 
 </details>
 
@@ -159,7 +166,7 @@ All tunables are at the top of `2--visual-overhaul.lua`.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `text_size` | `0.50` | Relative text size (0 to 1) |
+| `text_size` | `14` | Font size in points (passed to Font:getFace) |
 | `move_on_x` | `-15` | Horizontal offset (negative = left) |
 | `move_on_y` | `-1` | Vertical offset (negative = up) |
 | `badge_w` | `70` | Badge width in pixels |
@@ -204,15 +211,13 @@ All tunables are at the top of `2--visual-overhaul.lua`.
 |----------|---------|-------------|
 | `H` | `9` (scaled) | Bar height |
 | `RADIUS` | `3` (scaled) | Corner radius for rounded ends |
-| `INSET_X` | `6` (scaled) | Horizontal inset from inner cover edges |
-| `INSET_Y` | `12` (scaled) | Vertical inset from bottom inner edge |
-| `GAP_TO_ICON` | `0` (scaled) | Gap before the corner dogear icon |
+| `PERCENT_POS` | `77 / 100` | Vertical position as fraction of cover height |
 | `TRACK_COLOR` | `#F4F0EC` | Unfilled track colour |
 | `FILL_COLOR` | `#555555` | Progress fill colour |
 | `ABANDONED_COLOR` | `#C0C0C0` | Fill colour for abandoned/paused books |
 | `BORDER_W` | `0.5` (scaled) | Border width around track (0 to disable) |
 | `BORDER_COLOR` | `COLOR_BLACK` | Border colour |
-| `MIN_PERCENT` | `0.02` | Hide bar below this threshold (2%) |
+| `MIN_PERCENT` | `0.02` | Hide bar and reading dogear below this threshold (2%) |
 | `NEAR_COMPLETE_PERCENT` | `0.97` | Treat as complete above this (97%) |
 
 </details>
@@ -281,14 +286,18 @@ Copy `.env.example` to `.env` and set the three variables:
 | `KODEV` | Path to the `kodev` script | `/path/to/koreader/kodev` |
 | `LIBRARY` | Path to a test library of EPUB/PDF files | `/path/to/KOReader.patches/Library` |
 | `EMULATOR_PATCHES` | Path where the emulator symlink will be created (pointing back to this repo's `patches/`) | `/path/to/koreader-emulator/koreader/patches` |
+| `SIMULATE` | Device preset for the emulator screen size (default: `kobo-libra-2`) | `kobo-libra-2`, `kindle`, `custom` |
 
 ### Makefile targets
 
 | Target | Command | Description |
 |--------|---------|-------------|
 | `help` | `make` or `make help` | Show available targets |
-| `run` | `make run` | Symlink patches and run emulator in color |
-| `run-bw` | `make run-bw` | Symlink patches and run emulator in grayscale (Kobo e-ink simulation) |
-| `link-patches` | `make link-patches` | Create symlink at `EMULATOR_PATCHES` pointing to this repo's `patches/` |
+| `run` | `make run` | Symlink patches/icons and run emulator (`SIMULATE=<device>` to change screen) |
+| `run-bw` | `make run-bw` | Symlink patches/icons and run emulator in grayscale (`SIMULATE=<device>`) |
+| `link-patches` | `make link-patches` | Symlink emulator patches dir to this repo's `patches/` |
+| `link-icons` | `make link-icons` | Symlink emulator icons dir to this repo's `icons/` |
+| `devices` | `make devices` | List available device presets for `SIMULATE=` |
+| `reset` | `make reset` | Remove all KOReader state from the emulator |
 
-Both `KODEV` and `LIBRARY` must be set for `run` and `run-bw`. The grayscale target sets `EMULATE_BW_SCREEN=1` and `EMULATE_BB_TYPE=BB8` for true BW simulation.
+Both `KODEV` and `LIBRARY` must be set for `run` and `run-bw`. Set `SIMULATE=<device>` to change the emulator screen size (run `make devices` to see available presets). The grayscale target sets `EMULATE_BW_SCREEN=1` and `EMULATE_BB_TYPE=BB8` for true BW simulation.0

@@ -4,16 +4,36 @@ include .env
 
 EMULATOR_KOREADER := $(patsubst %/patches,%,$(EMULATOR_PATCHES))
 
-.PHONY: help run run-bw link-patches link-icons reset
+SIMULATE ?= kobo-libra-2
+
+# Device presets (used when SIMULATE is set)
+# kodev built-in: kindle, legacy-paperwhite, kobo-forma, kobo-aura-one,
+#                 kobo-clara, kindle-paperwhite, kobo-h2o, hidpi
+# Custom presets resolved below.
+
+# Custom device presets (not built into kodev)
+ifeq ($(SIMULATE),kobo-libra-2)
+  KODEV_SCREEN_FLAGS := -W 632 -H 840 -D 300
+  export EMULATE_READER_PIXEL_SCALE := 2
+else ifeq ($(SIMULATE),boox-go-7)
+  KODEV_SCREEN_FLAGS := -W 632 -H 840 -D 300
+  export EMULATE_READER_PIXEL_SCALE := 2
+else ifeq ($(SIMULATE),custom)
+  KODEV_SCREEN_FLAGS := -W $(SCREEN_W) -H $(SCREEN_H) -D $(DPI)
+else
+  KODEV_SCREEN_FLAGS := -s $(SIMULATE)
+endif
+
+.PHONY: help run run-bw link-patches link-icons reset devices
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(firstword $(MAKEFILE_LIST)) | awk -F ':.*## ' '{printf "  %-15s %s\n", $$1, $$2}'
 
-run: link-patches link-icons ## Run emulator in color
-	$(KODEV) run -v $(LIBRARY)
+run: link-patches link-icons ## Run emulator (SIMULATE=<device> to change screen)
+	$(KODEV) run -v $(KODEV_SCREEN_FLAGS) $(LIBRARY)
 
-run-bw: link-patches link-icons ## Run emulator in grayscale (Kobo e-ink simulation)
-	EMULATE_BW_SCREEN=1 EMULATE_BB_TYPE=BB8 $(KODEV) run -v $(LIBRARY)
+run-bw: link-patches link-icons ## Run emulator in grayscale (SIMULATE=<device>)
+	EMULATE_BW_SCREEN=1 EMULATE_BB_TYPE=BB8 $(KODEV) run -v $(KODEV_SCREEN_FLAGS) $(LIBRARY)
 
 link-patches: ## Symlink emulator patches dir to this repo's patches/
 ifndef EMULATOR_PATCHES
@@ -66,6 +86,21 @@ endif
 	@rm -f "$(EMULATOR_ICONS)"
 	@ln -s "$(CURDIR)/icons" "$(EMULATOR_ICONS)"
 	@echo "Symlinked $(EMULATOR_ICONS) -> $(CURDIR)/icons"
+
+devices: ## List available device presets for SIMULATE=
+	@echo "Custom presets:"
+	@echo "  kobo-libra-2       632x840 @ 300 DPI (default)"
+	@echo "  boox-go-7          632x840 @ 300 DPI"
+	@echo "  custom             use SCREEN_W, SCREEN_H, DPI vars"
+	@echo ""
+	@echo "kodev built-in presets:"
+	@echo "  kindle             600x800   @ 167 DPI"
+	@echo "  legacy-paperwhite  758x1024  @ 212 DPI"
+	@echo "  kobo-forma         1440x1920 @ 300 DPI"
+	@echo "  kobo-aura-one      1404x1872 @ 300 DPI"
+	@echo "  kobo-clara         1072x1448 @ 300 DPI"
+	@echo "  kobo-h2o           1080x1429 @ 265 DPI"
+	@echo "  hidpi              1500x2000 @ 600 DPI"
 
 reset: ## Remove all KOReader state from the emulator (stats, settings, cache, history, sidecars)
 ifndef EMULATOR_PATCHES

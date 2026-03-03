@@ -33,18 +33,19 @@ local folder_name = true            -- set to false to remove folder title from 
 
 --========================== [[Pages badge preferences]] ================================
 local pages_cfg = {
-    font_size = 0.95,                             -- Adjust from 0 to 1
+    font_size = 10,                               -- Direct font size (passed to Font:getFace)
     text_color = Blitbuffer.COLOR_WHITE,          -- Choose your desired color
     border_thickness = 2,                         -- Adjust from 0 to 5
     border_corner_radius = 12,                    -- Adjust from 0 to 20
     border_color = Blitbuffer.COLOR_DARK_GRAY,    -- Choose your desired color
     background_color = Blitbuffer.COLOR_GRAY_3,   -- Choose your desired color
-    move_from_border = 8,                         -- Choose how far in the badge should sit
+    inset_x = Screen:scaleBySize(4),              -- Horizontal inset from cover edge
+    inset_y = Screen:scaleBySize(8),              -- Vertical inset from cover edge
 }
 
 --========================== [[Percent badge preferences]] ==============================
 local percent_cfg = {
-    text_size = 0.50,   -- Adjust from 0 to 1
+    text_size = 14,     -- Direct font size (passed to Font:getFace)
     move_on_x = -15,     -- Adjust how far left the badge should sit
     move_on_y = -1,     -- Adjust how far up the badge should sit
     badge_w = 70,       -- Adjust badge width
@@ -83,9 +84,7 @@ local focus_cfg = {
 local bar_cfg = {
     H = Screen:scaleBySize(9),                              -- bar height
     RADIUS = Screen:scaleBySize(3),                         -- rounded ends
-    INSET_X = Screen:scaleBySize(6),                        -- from inner cover edges
-    INSET_Y = Screen:scaleBySize(12),                       -- from bottom inner edge
-    GAP_TO_ICON = Screen:scaleBySize(0),                    -- gap before corner icon
+    PERCENT_POS = 77 / 100,                                   -- vertical position as fraction of cover height
     TRACK_COLOR = Blitbuffer.colorFromString("#F4F0EC"),     -- bar color
     FILL_COLOR = Blitbuffer.colorFromString("#555555"),      -- fill color
     ABANDONED_COLOR = Blitbuffer.colorFromString("#C0C0C0"), -- fill when abandoned/paused
@@ -100,6 +99,62 @@ local FolderCover = {
     name = ".cover",
     exts = { ".jpg", ".jpeg", ".png", ".webp", ".gif" },
 }
+
+-- ============================================================================
+-- Hide images that share a basename with a book file; use them as covers
+-- ============================================================================
+local image_ext_set = {}
+for _, ext in ipairs(FolderCover.exts) do
+    image_ext_set[ext:sub(2):lower()] = true  -- strip leading dot
+end
+
+local function filterMatchingImages(item_table)
+    if not item_table then return end
+
+    local book_basenames = {}
+    for _, item in ipairs(item_table) do
+        if item.is_file and item.path then
+            local base, suffix = util.splitFileNameSuffix(item.path)
+            if not image_ext_set[suffix:lower()] then
+                book_basenames[base] = true
+            end
+        end
+    end
+
+    local i = 1
+    while i <= #item_table do
+        local item = item_table[i]
+        if item.is_file and item.path then
+            local base, suffix = util.splitFileNameSuffix(item.path)
+            if image_ext_set[suffix:lower()] and book_basenames[base] then
+                table.remove(item_table, i)
+            else
+                i = i + 1
+            end
+        else
+            i = i + 1
+        end
+    end
+end
+
+local DocSettings = require("docsettings")
+local orig_findCustomCoverFile = DocSettings.findCustomCoverFile
+
+function DocSettings:findCustomCoverFile(doc_path, ...)
+    local result = orig_findCustomCoverFile(self, doc_path, ...)
+    if result then return result end
+
+    doc_path = doc_path or (self.data and self.data.doc_path)
+    if not doc_path then return end
+
+    local base = util.splitFileNameSuffix(doc_path)
+    for _, ext in ipairs(FolderCover.exts) do
+        local img_path = base .. ext  -- ext already has the dot
+        if util.fileExists(img_path) then
+            return img_path
+        end
+    end
+end
 
 local Folder = {
     face = {
@@ -568,7 +623,7 @@ local function patchVisualOverhaul(plugin)
                     self._cover_frame.bordersize = 0
                 end
 
-                -- Build secondary line: series (#N) or author
+                -- Build secondary line: series (#N) + author, or just author
                 local meta_line
                 if has_meta then
                     if bookinfo.series then
@@ -576,13 +631,16 @@ local function patchVisualOverhaul(plugin)
                         if bookinfo.series_index then
                             meta_line = meta_line .. " #" .. bookinfo.series_index
                         end
+                        if bookinfo.authors then
+                            meta_line = meta_line .. "\n" .. bookinfo.authors
+                        end
                     elseif bookinfo.authors then
                         meta_line = bookinfo.authors
                     end
                 end
 
                 local strip_content_h = title_strip_h - Screen:scaleBySize(title_cfg.padding)
-                local title_max_h = meta_line and (title_line_h * 2) or strip_content_h
+                local title_max_h = meta_line and title_line_h or strip_content_h
                 local meta_max_h = meta_line and (strip_content_h - title_max_h) or 0
 
                 if self._title_widget then
@@ -758,9 +816,11 @@ local function patchVisualOverhaul(plugin)
             if text:match("/$") then text = text:sub(1, -2) end
             text = BD.directory(capitalize(text))
 
+            local has_folder_meta = item_count > 0
+                or (self.entry and self.entry.is_series_group and self.entry._series_author)
             local strip_content_h = title_strip_h - Screen:scaleBySize(title_cfg.padding)
-            local title_max_h = (item_count > 0) and (title_line_h * 2) or strip_content_h
-            local meta_max_h = (item_count > 0) and (strip_content_h - title_max_h) or 0
+            local title_max_h = has_folder_meta and (title_line_h * 2) or strip_content_h
+            local meta_max_h = has_folder_meta and (strip_content_h - title_max_h) or 0
 
             self._folder_title_widget = TextBoxWidget:new{
                 text = text,
@@ -774,8 +834,13 @@ local function patchVisualOverhaul(plugin)
                 height_overflow_show_ellipsis = true,
             }
 
-            if item_count > 0 and meta_max_h > 0 then
-                local meta_text = tostring(item_count) .. " " .. (item_count == 1 and _("book") or _("books"))
+            if has_folder_meta and meta_max_h > 0 then
+                local meta_text
+                if self.entry and self.entry.is_series_group and self.entry._series_author then
+                    meta_text = self.entry._series_author
+                else
+                    meta_text = tostring(item_count) .. " " .. (item_count == 1 and _("book") or _("books"))
+                end
                 self._folder_meta_widget = TextBoxWidget:new{
                     text = meta_text,
                     face = Font:getFace("cfont", title_cfg.meta_font_size),
@@ -993,7 +1058,7 @@ local function patchVisualOverhaul(plugin)
             local bar_w = math.max(1, math.floor(fw * 0.92))
             local bar_h = bar_cfg.H
             local bar_x = I(fx + math.floor((fw - bar_w) / 2))
-            local bar_y = I(fy + math.floor(fh * 8 / 10))
+            local bar_y = I(fy + math.floor(fh * bar_cfg.PERCENT_POS))
 
             bb:paintRoundedRect(
                 bar_x - bar_cfg.BORDER_W, bar_y - bar_cfg.BORDER_W,
@@ -1021,6 +1086,7 @@ local function patchVisualOverhaul(plugin)
             or effective_status == "abandoned"
             or (
                 self.percent_finished
+                and self.percent_finished >= bar_cfg.MIN_PERCENT
                 and (
                     (self.do_hint_opened and self.been_opened)
                     or self.menu.name == "history"
@@ -1102,9 +1168,8 @@ local function patchVisualOverhaul(plugin)
             end
 
             if page_count then
-                local pages_corner_mark_size = Screen:scaleBySize(10)
                 local page_text = page_count .. " p."
-                local pfont_size = math.floor(pages_corner_mark_size * pages_cfg.font_size)
+                local pfont_size = pages_cfg.font_size
 
                 local pages_text = TextWidget:new({
                     text = page_text,
@@ -1130,8 +1195,8 @@ local function patchVisualOverhaul(plugin)
                 local cover_bottom = y + cover_area_h - math.floor((cover_area_h - fh) / 2)
                 local badge_w, badge_h = pages_badge:getSize().w, pages_badge:getSize().h
 
-                local pos_x_badge = cover_left + Screen:scaleBySize(4)
-                local pos_y_badge = cover_bottom - badge_h - Screen:scaleBySize(8)
+                local pos_x_badge = cover_left + pages_cfg.inset_x
+                local pos_y_badge = cover_bottom - badge_h - pages_cfg.inset_y
 
                 pages_badge:paintTo(bb, pos_x_badge, pos_y_badge)
             end
@@ -1144,9 +1209,8 @@ local function patchVisualOverhaul(plugin)
                 or self.menu.name == "history"
                 or self.menu.name == "collections"
             then
-                local pct_corner_mark_size = Screen:scaleBySize(20)
                 local percent_text = string.format("%d%%", math.floor(self.percent_finished * 100))
-                local pct_font_size = math.floor(pct_corner_mark_size * percent_cfg.text_size)
+                local pct_font_size = percent_cfg.text_size
                 local percent_widget = TextWidget:new({
                     text = percent_text,
                     font_size = pct_font_size,
@@ -1154,7 +1218,7 @@ local function patchVisualOverhaul(plugin)
                     alignment = "center",
                     fgcolor = Blitbuffer.COLOR_BLACK,
                     bold = true,
-                    max_width = pct_corner_mark_size,
+                    max_width = Screen:scaleBySize(20),
                     truncate_with_ellipsis = true,
                 })
 
@@ -1310,12 +1374,24 @@ local function patchVisualOverhaul(plugin)
 
         local is_name_sort = (collate_id == "strcoll" or collate_id == "natural" or collate_id == "title")
 
+        -- Pass 1: Pre-scan to count books per series
+        local series_book_count = {}
+        for _, item in ipairs(item_table) do
+            if item.is_file and item.path then
+                local doc_props = item.doc_props or BookInfoManager:getDocProps(item.path)
+                if doc_props and doc_props.series and doc_props.series ~= "\u{FFFF}" then
+                    series_book_count[doc_props.series] = (series_book_count[doc_props.series] or 0) + 1
+                end
+            end
+        end
+
         local series_map = {}
         local processed_list = {}
 
         local book_count = 0
         local non_series_book_count = 0
 
+        -- Pass 2: Build groups only for multi-book series
         for _, item in ipairs(item_table) do
             if item.is_go_up then
                 table.insert(processed_list, item)
@@ -1331,7 +1407,8 @@ local function patchVisualOverhaul(plugin)
                     book_count = book_count + 1
 
                     local doc_props = item.doc_props or BookInfoManager:getDocProps(item.path)
-                    if doc_props and doc_props.series and doc_props.series ~= "\u{FFFF}" then
+                    if doc_props and doc_props.series and doc_props.series ~= "\u{FFFF}"
+                       and series_book_count[doc_props.series] >= 2 then
                         local series_name = doc_props.series
 
                         item._series_index = doc_props.series_index or 0
@@ -1351,6 +1428,7 @@ local function patchVisualOverhaul(plugin)
                                 is_directory = true,
                                 path = (item.path:match("(.*/)") or item.path) .. series_name,
                                 is_series_group = true,
+                                _series_author = doc_props.authors,
                                 series_items = { item },
                                 attr = group_attr,
                                 mode = "directory",
@@ -1366,7 +1444,6 @@ local function patchVisualOverhaul(plugin)
                             }
                             series_map[series_name] = group_item
                             table.insert(processed_list, group_item)
-                            group_item._list_index = #processed_list
                         else
                             table.insert(series_map[series_name].series_items, item)
                         end
@@ -1396,17 +1473,10 @@ local function patchVisualOverhaul(plugin)
         end
 
         for _, group in pairs(series_map) do
-            if #group.series_items == 1 then
-                if group._list_index and processed_list[group._list_index] == group then
-                    local single_book = group.series_items[1]
-                    processed_list[group._list_index] = single_book
-                end
-            else
-                group.mandatory = tostring(#group.series_items) .. " \u{F016}"
-                table.sort(group.series_items, function(a, b)
-                    return (a._series_index or 0) < (b._series_index or 0)
-                end)
-            end
+            group.mandatory = tostring(#group.series_items) .. " \u{F016}"
+            table.sort(group.series_items, function(a, b)
+                return (a._series_index or 0) < (b._series_index or 0)
+            end)
         end
 
         local final_table = {}
@@ -1533,6 +1603,8 @@ local function patchVisualOverhaul(plugin)
     local old_switchItemTable = FileChooser.switchItemTable
 
     FileChooser.switchItemTable = function(file_chooser, new_title, new_item_table, itemnumber, itemmatch, new_subtitle)
+        filterMatchingImages(new_item_table)
+
         if isSeriesEnabled() and new_item_table and not new_item_table.is_in_series_view then
             AutomaticSeries:processItemTable(new_item_table, file_chooser)
         end
