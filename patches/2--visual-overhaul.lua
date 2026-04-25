@@ -21,6 +21,26 @@ local logger = require("logger")
 local DEBUG_ICONS = false  -- set false to silence custom-icon diagnostics
 --=======================================================================================
 
+--========================== [[Feature toggles]] ==========================================
+-- Set to false to disable a feature. These are defaults; toggle at runtime
+-- via Menu > File browser > Mosaic and detailed list settings > Visual features.
+local cfg_features = {
+    cover_aspect_ratio = true,   -- Stretched covers with custom aspect ratio
+    rounded_corners    = true,   -- Rounded corner overlays on covers
+    folder_covers      = true,   -- Show cover images on folders
+    stacked_bars       = true,   -- Stacked bars above folder covers
+    title_strip        = true,   -- Book title + author below cover
+    progress_bar       = true,   -- Reading progress bar on covers
+    percent_badge      = true,   -- Percentage read badge (top-right)
+    pages_badge        = true,   -- Page count badge (bottom-left)
+    series_badge       = true,   -- Series index "#N" badge (top-center)
+    dogear             = true,   -- Status dogear icons (reading/complete/abandoned)
+    new_badge          = true,   -- "New" badge on recently added unread books
+    virtual_series     = true,   -- Auto-group books by series into virtual folders
+    image_as_cover     = true,   -- Use same-basename images as book covers
+}
+--=========================================================================================
+
 --========================== [[Cover preferences]] ======================================
 local aspect_ratio = 2 / 3          -- adjust aspect ratio of folder cover
 local stretch_limit = 50            -- adjust the stretching limit
@@ -133,25 +153,6 @@ local function filterMatchingImages(item_table)
             end
         else
             i = i + 1
-        end
-    end
-end
-
-local DocSettings = require("docsettings")
-local orig_findCustomCoverFile = DocSettings.findCustomCoverFile
-
-function DocSettings:findCustomCoverFile(doc_path, ...)
-    local result = orig_findCustomCoverFile(self, doc_path, ...)
-    if result then return result end
-
-    doc_path = doc_path or (self.data and self.data.doc_path)
-    if not doc_path then return end
-
-    local base = util.splitFileNameSuffix(doc_path)
-    for _, ext in ipairs(FolderCover.exts) do
-        local img_path = base .. ext  -- ext already has the dot
-        if util.fileExists(img_path) then
-            return img_path
         end
     end
 end
@@ -449,6 +450,37 @@ local function patchVisualOverhaul(plugin)
     if not MosaicMenuItem or MosaicMenuItem.patched_visual_overhaul then return end
     MosaicMenuItem.patched_visual_overhaul = true
 
+    -- Feature toggle helpers (persisted via BookInfoManager, defaults from cfg_features)
+    local FEAT_PREFIX = "feat_"
+    local function feat(key)
+        local stored = BookInfoManager:getSetting(FEAT_PREFIX .. key)
+        if stored == nil then return cfg_features[key] ~= false end
+        return stored == "Y"
+    end
+    local function toggleFeat(key)
+        BookInfoManager:saveSetting(FEAT_PREFIX .. key, feat(key) and "N" or "Y")
+    end
+
+    -- [image_as_cover] Use same-basename images as book covers
+    local DocSettings = require("docsettings")
+    local orig_findCustomCoverFile = DocSettings.findCustomCoverFile
+    function DocSettings:findCustomCoverFile(doc_path, ...)
+        local result = orig_findCustomCoverFile(self, doc_path, ...)
+        if result then return result end
+        if not feat("image_as_cover") then return end
+
+        doc_path = doc_path or (self.data and self.data.doc_path)
+        if not doc_path then return end
+
+        local base = util.splitFileNameSuffix(doc_path)
+        for _, ext in ipairs(FolderCover.exts) do
+            local img_path = base .. ext
+            if util.fileExists(img_path) then
+                return img_path
+            end
+        end
+    end
+
     -- Compute title strip height (reused in init, update, paintTo)
     local title_face = Font:getFace("cfont", title_cfg.font_size)
     local _sample = TextWidget:new{ text = "Ag", face = title_face }
@@ -481,6 +513,7 @@ local function patchVisualOverhaul(plugin)
             local StretchingImageWidget = local_ImageWidget:extend({})
             StretchingImageWidget.init = function(self)
                 if local_ImageWidget.init then local_ImageWidget.init(self) end
+                if not feat("cover_aspect_ratio") then return end
                 if not max_img_w and not max_img_h then return end
 
                 self.scale_factor = nil
@@ -517,17 +550,6 @@ local function patchVisualOverhaul(plugin)
         show_folder_name = BooleanSetting(_("Show folder name"), "folder_name_show", folder_name),
     }
 
-    -- Series grouping toggle
-    local series_setting_name = "automatic_series_grouping_enabled"
-    local function isSeriesEnabled()
-        local setting = BookInfoManager:getSetting(series_setting_name)
-        return setting ~= "N"
-    end
-
-    local function setSeriesEnabled(enabled)
-        BookInfoManager:saveSetting(series_setting_name, enabled and "Y" or "N")
-    end
-
     -- Capture originals before any overrides
     local orig_init = MosaicMenuItem.init
     local orig_paintTo = MosaicMenuItem.paintTo
@@ -537,6 +559,21 @@ local function patchVisualOverhaul(plugin)
     -- Corner mark size for progress bar (extract before wrapping paintTo)
     local corner_mark_size = userpatch.getUpValue(orig_paintTo, "corner_mark_size")
         or Screen:scaleBySize(24)
+
+    -- Find upvalue index for corner_mark_size so we can suppress original corner marks
+    local corner_mark_size_idx
+    do
+        local n = 1
+        while true do
+            local name = debug.getupvalue(orig_paintTo, n)
+            if not name then break end
+            if name == "corner_mark_size" then
+                corner_mark_size_idx = n
+                break
+            end
+            n = n + 1
+        end
+    end
 
     local function I(v)
         return math.floor(v + 0.5)
@@ -548,13 +585,18 @@ local function patchVisualOverhaul(plugin)
         if self.width and self.height then
             local border_size = Size.border.thin
             max_img_w = self.width - 2 * border_size
-            max_img_h = self.height - 2 * border_size - title_strip_h - card_gap_px
+            if feat("title_strip") then
+                max_img_h = self.height - 2 * border_size - title_strip_h - card_gap_px
+            else
+                max_img_h = self.height - 2 * border_size
+            end
         end
         if orig_init then orig_init(self) end
 
         -- [overlays] build series badge
         if self.is_directory or self.file_deleted then return end
 
+        if not feat("series_badge") then return end
         local bookinfo = BookInfoManager:getBookInfo(self.filepath, false)
         if bookinfo and bookinfo.series and bookinfo.series_index then
             self.series_index = bookinfo.series_index
@@ -588,7 +630,7 @@ local function patchVisualOverhaul(plugin)
 
         -- [pages] Capture page count from sidecar (BookList cache, no new I/O)
         self.pages = nil
-        if self.filepath and not self.is_directory and not self.file_deleted then
+        if feat("pages_badge") and self.filepath and not self.is_directory and not self.file_deleted then
             local book_info = self.menu.getBookInfo(self.filepath)
             if book_info and book_info.pages then
                 self.pages = book_info.pages
@@ -597,7 +639,7 @@ local function patchVisualOverhaul(plugin)
 
         -- [new] Flag recently added, unread books
         self._is_new = false
-        if self.filepath and not self.is_directory and not self.file_deleted
+        if feat("new_badge") and self.filepath and not self.is_directory and not self.file_deleted
             and not self.percent_finished and not self.been_opened then
             local attr = lfs.attributes(self.filepath)
             if attr and attr.modification then
@@ -609,7 +651,7 @@ local function patchVisualOverhaul(plugin)
         end
 
         -- [title] Shrink CenterContainer so cover sits in top portion; store title/meta for paintTo
-        if self._has_cover_image and not self.is_directory and not self.file_deleted then
+        if feat("title_strip") and self._has_cover_image and not self.is_directory and not self.file_deleted then
             local bookinfo = BookInfoManager:getBookInfo(self.filepath, false)
             local has_meta = bookinfo and not bookinfo.ignore_meta
             local title_text = (has_meta and bookinfo.title) or self.text
@@ -677,7 +719,7 @@ local function patchVisualOverhaul(plugin)
         end
 
         -- [covers] folder cover logic
-        if not self._foldercover_processed and not self.menu.no_refresh_covers and self.do_cover_image then
+        if feat("folder_covers") and not self._foldercover_processed and not self.menu.no_refresh_covers and self.do_cover_image then
             if not (self.entry.is_file or self.entry.file) and self.mandatory then
                 local dir_path = self.entry and self.entry.path
                 if dir_path then
@@ -936,10 +978,43 @@ local function patchVisualOverhaul(plugin)
         return directory
     end
 
+    -- Capture modules needed for overlay suppression during orig_paintTo
+    local ProgressWidget = require("ui/widget/progresswidget")
+    local ReadCollection = require("readcollection")
+    local orig_ProgressWidget_paintTo = ProgressWidget.paintTo
+    local orig_isFileInCollections = ReadCollection.isFileInCollections
+    local orig_BookInfoManager_getSetting = BookInfoManager.getSetting
+
     -- MosaicMenuItem.paintTo -- ONE override
     local _dbg_paint_seen = {}
     function MosaicMenuItem:paintTo(bb, x, y)
+        -- Temporarily suppress original CoverBrowser overlays so they don't
+        -- double-render with our custom ones:
+        -- 1. Zero out corner_mark_size (suppresses original triangular corner marks)
+        local saved_corner_mark_size
+        if corner_mark_size_idx then
+            _, saved_corner_mark_size = debug.getupvalue(orig_paintTo, corner_mark_size_idx)
+            debug.setupvalue(orig_paintTo, corner_mark_size_idx, 0)
+        end
+        -- 2. Replace ProgressWidget.paintTo with noop (suppresses original progress bar)
+        ProgressWidget.paintTo = function() end
+        -- 3. Make ReadCollection.isFileInCollections return false (suppresses collection star)
+        ReadCollection.isFileInCollections = function() return false end
+        -- 4. Override BookInfoManager:getSetting("no_hint_description") to return true (suppresses hint)
+        BookInfoManager.getSetting = function(self_bim, key, ...)
+            if key == "no_hint_description" then return true end
+            return orig_BookInfoManager_getSetting(self_bim, key, ...)
+        end
+
         orig_paintTo(self, bb, x, y)
+
+        -- Restore all originals
+        if corner_mark_size_idx then
+            debug.setupvalue(orig_paintTo, corner_mark_size_idx, saved_corner_mark_size)
+        end
+        ProgressWidget.paintTo = orig_ProgressWidget_paintTo
+        ReadCollection.isFileInCollections = orig_isFileInCollections
+        BookInfoManager.getSetting = orig_BookInfoManager_getSetting
 
         -- One-shot per-file debug dump (only first paintTo per filepath)
         if DEBUG_ICONS and self.filepath and not _dbg_paint_seen[self.filepath] then
@@ -971,6 +1046,7 @@ local function patchVisualOverhaul(plugin)
                 local image_y = fy + math.floor((frame_dimen.h - image_size.h) / 2)
 
                 -- Draw stacked bars above folder cover
+                if feat("stacked_bars") then
                 local BAR_FILLS     = { Blitbuffer.COLOR_GRAY_5, Blitbuffer.COLOR_GRAY_9, Blitbuffer.COLOR_GRAY_D }
                 local BAR_BORDERS   = { Blitbuffer.COLOR_GRAY_1, Blitbuffer.COLOR_GRAY_5, Blitbuffer.COLOR_GRAY_9 }
                 local BAR_BORDER_W  = 1
@@ -990,6 +1066,7 @@ local function patchVisualOverhaul(plugin)
                     bb:paintBorder(bar_x, bar_y, bar_w, BAR_HEIGHT, BAR_BORDER_W, BAR_BORDERS[i])
                     current_y = bar_y - BAR_HEIGHT - BAR_SPACING
                 end
+                end -- feat("stacked_bars")
 
                 -- White fill from below cover to cell bottom
                 local fill_top = fy + frame_dimen.h
@@ -1002,7 +1079,9 @@ local function patchVisualOverhaul(plugin)
                 local cover_border_w = Screen:scaleBySize(folder_border)
                 bb:paintBorder(image_x, image_y, image_size.w - 1, image_size.h, cover_border_w, Blitbuffer.COLOR_DARK_GRAY, 0, false)
 
-                paintCorners(bb, image_x, image_y, image_size.w, image_size.h)
+                if feat("rounded_corners") then
+                    paintCorners(bb, image_x, image_y, image_size.w, image_size.h)
+                end
 
                 -- Folder title below cover
                 if self._folder_title_widget then
@@ -1047,11 +1126,13 @@ local function patchVisualOverhaul(plugin)
             bb:paintRect(fx, fill_top, fw, fill_h, Blitbuffer.COLOR_WHITE)
         end
 
-        paintCorners(bb, fx, fy, fw, fh)
+        if feat("rounded_corners") then
+            paintCorners(bb, fx, fy, fw, fh)
+        end
 
         -- [overlays] Progress bar (hidden below MIN_PERCENT and at/above NEAR_COMPLETE_PERCENT)
         local pf = self.percent_finished
-        local _has_bar = pf and self.status ~= "complete"
+        local _has_bar = feat("progress_bar") and pf and self.status ~= "complete"
             and pf >= bar_cfg.MIN_PERCENT and pf < bar_cfg.NEAR_COMPLETE_PERCENT
         local bar_bottom_y  -- y coordinate of bottom edge of bar (used by pages badge)
         if _has_bar then
@@ -1082,7 +1163,7 @@ local function patchVisualOverhaul(plugin)
             effective_status = "complete"
         end
 
-        local _show_dogear = effective_status == "complete"
+        local _show_dogear = feat("dogear") and (effective_status == "complete"
             or effective_status == "abandoned"
             or (
                 self.percent_finished
@@ -1092,7 +1173,7 @@ local function patchVisualOverhaul(plugin)
                     or self.menu.name == "history"
                     or self.menu.name == "collections"
                 )
-            )
+            ))
         if DEBUG_ICONS and self.filepath and _dbg_paint_seen[self.filepath] == true then
             _dbg_paint_seen[self.filepath] = "logged"
             local fname = self.filepath:match("[^/]+$") or self.filepath
@@ -1144,7 +1225,7 @@ local function patchVisualOverhaul(plugin)
         end
 
         -- [overlays] Pages badge (bottom-left, non-complete books)
-        local _show_pages = not self.is_directory and not self.file_deleted
+        local _show_pages = feat("pages_badge") and not self.is_directory and not self.file_deleted
             and self.status ~= "complete"
         if DEBUG_ICONS and self.filepath and _dbg_paint_seen[self.filepath] == "logged" then
             _dbg_paint_seen[self.filepath] = "done"
@@ -1203,7 +1284,7 @@ local function patchVisualOverhaul(plugin)
         end
 
         -- [overlays] Percent badge (top-right, in-progress books)
-        if not self.is_directory and self.status ~= "complete" and self.percent_finished then
+        if feat("percent_badge") and not self.is_directory and self.status ~= "complete" and self.percent_finished then
             if
                 (self.do_hint_opened and self.been_opened)
                 or self.menu.name == "history"
@@ -1253,7 +1334,7 @@ local function patchVisualOverhaul(plugin)
         end
 
         -- [overlays] Series badge (top-center)
-        if self.has_series_badge and self.series_badge then
+        if feat("series_badge") and self.has_series_badge and self.series_badge then
             local series_badge_size = self.series_badge:getSize()
             local sbadge_x = target.dimen.x + math.floor((target.dimen.w - series_badge_size.w) / 2)
             local sbadge_y = target.dimen.y + 5
@@ -1262,7 +1343,7 @@ local function patchVisualOverhaul(plugin)
         end
 
         -- [overlays] New badge (top-left, recently added unread books)
-        if self._is_new then
+        if feat("new_badge") and self._is_new then
             local NBADGE_W = Screen:scaleBySize(new_badge_cfg.badge_w)
             local NBADGE_H = Screen:scaleBySize(new_badge_cfg.badge_h)
 
@@ -1603,9 +1684,11 @@ local function patchVisualOverhaul(plugin)
     local old_switchItemTable = FileChooser.switchItemTable
 
     FileChooser.switchItemTable = function(file_chooser, new_title, new_item_table, itemnumber, itemmatch, new_subtitle)
-        filterMatchingImages(new_item_table)
+        if feat("image_as_cover") then
+            filterMatchingImages(new_item_table)
+        end
 
-        if isSeriesEnabled() and new_item_table and not new_item_table.is_in_series_view then
+        if feat("virtual_series") and new_item_table and not new_item_table.is_in_series_view then
             AutomaticSeries:processItemTable(new_item_table, file_chooser)
         end
 
@@ -1631,7 +1714,7 @@ local function patchVisualOverhaul(plugin)
 
     FileChooser.refreshPath = function(file_chooser)
         old_refreshPath(file_chooser)
-        if isSeriesEnabled() and current_series_group then
+        if feat("virtual_series") and current_series_group then
             local series_name = current_series_group.series_name
             for _, item in ipairs(file_chooser.item_table) do
                 if item.is_series_group and item.text == series_name then
@@ -1650,7 +1733,7 @@ local function patchVisualOverhaul(plugin)
     end
 
     FileChooser.onMenuSelect = function(file_chooser, item)
-        if isSeriesEnabled() and item.is_series_group then
+        if feat("virtual_series") and item.is_series_group then
             AutomaticSeries:openSeriesGroup(file_chooser, item)
             return true
         end
@@ -1675,7 +1758,7 @@ local function patchVisualOverhaul(plugin)
     end
 
     FileChooser.updateItems = function(file_chooser, ...)
-        if not isSeriesEnabled() then
+        if not feat("virtual_series") then
             current_series_group = nil
             return old_updateItems(file_chooser, ...)
         end
@@ -1732,27 +1815,44 @@ local function patchVisualOverhaul(plugin)
                 end
             end
 
-            -- [series] inject "Group book series into folders" toggle
-            local already_added = false
-            for _, sub_item in ipairs(menu_items.filebrowser_settings.sub_item_table) do
-                if sub_item._automatic_series_menu_item then
-                    already_added = true
-                    break
-                end
-            end
+            -- [features] inject feature toggle submenu
+            local feature_items = {
+                { key = "cover_aspect_ratio", text = _("Stretched covers (aspect ratio)"), full_refresh = true },
+                { key = "rounded_corners",    text = _("Rounded corner overlays") },
+                { key = "folder_covers",      text = _("Folder cover images"), full_refresh = true },
+                { key = "stacked_bars",       text = _("Stacked bars above folders") },
+                { key = "title_strip",        text = _("Title strip below covers"), full_refresh = true },
+                { key = "progress_bar",       text = _("Reading progress bar") },
+                { key = "percent_badge",      text = _("Percent read badge") },
+                { key = "pages_badge",        text = _("Page count badge") },
+                { key = "series_badge",       text = _("Series index badge"), full_refresh = true },
+                { key = "dogear",             text = _("Status dogear icons") },
+                { key = "new_badge",          text = _("New book badge") },
+                { key = "image_as_cover",     text = _("Image file as book cover"), full_refresh = true },
+                { key = "virtual_series",     text = _("Group series into virtual folders"), full_refresh = true },
+            }
 
-            if not already_added then
-                table.insert(menu_items.filebrowser_settings.sub_item_table, {
-                    text = _("Group book series into folders"),
-                    separator = true,
-                    checked_func = isSeriesEnabled,
+            local feat_sub_items = {}
+            for _, fi in ipairs(feature_items) do
+                table.insert(feat_sub_items, {
+                    text = fi.text,
+                    checked_func = function() return feat(fi.key) end,
                     callback = function()
-                        setSeriesEnabled(not isSeriesEnabled())
-                        if self.ui and self.ui.file_chooser then
+                        toggleFeat(fi.key)
+                        if fi.full_refresh then
                             self.ui.file_chooser:refreshPath()
+                        else
+                            self.ui.file_chooser:updateItems()
                         end
                     end,
-                    _automatic_series_menu_item = true,
+                })
+            end
+
+            if item then
+                table.insert(item.sub_item_table, {
+                    text = _("Visual features"),
+                    separator = true,
+                    sub_item_table = feat_sub_items,
                 })
             end
         end
