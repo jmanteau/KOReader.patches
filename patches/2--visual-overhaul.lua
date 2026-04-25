@@ -38,6 +38,7 @@ local cfg_features = {
     new_badge          = true,   -- "New" badge on recently added unread books
     virtual_series     = true,   -- Auto-group books by series into virtual folders
     image_as_cover     = true,   -- Use same-basename images as book covers
+    wallpaper_mode     = false,  -- Transparent backgrounds for wallpaper compatibility
 }
 --=========================================================================================
 
@@ -261,6 +262,16 @@ for k, name in pairs(icons) do
     end
 end
 
+local CORNER_R
+do
+    local function _csz(w)
+        if w and w.getSize then return w:getSize().w end
+        if w and w.getWidth then return w:getWidth() end
+        return 0
+    end
+    CORNER_R = _csz(corners.tl)
+end
+
 local function findCover(dir_path)
     local path = dir_path .. "/" .. FolderCover.name
     for _, ext in ipairs(FolderCover.exts) do
@@ -353,6 +364,41 @@ local function paintTopCorners(bb, x, y, w, h)
     local trw, trh = _sz(TR)
     if TL.paintTo then TL:paintTo(bb, x, y) else bb:blitFrom(TL, x, y) end
     if TR.paintTo then TR:paintTo(bb, x + w - trw, y) else bb:blitFrom(TR, x + w - trw, y) end
+end
+
+local function roundCornersFromBg(bb, strips, cell_x, cell_y, cell_h, fx, fy, fw, fh, r)
+    local r2 = r * r
+    for py = 0, r - 1 do
+        for px = 0, r - 1 do
+            local dx_tl, dy_tl = r - px, r - py
+            if dx_tl * dx_tl + dy_tl * dy_tl > r2 then
+                local sx = fx - cell_x + px
+                bb:setPixel(fx + px, fy + py, strips.top:getPixel(sx, fy - cell_y + py))
+            end
+            local dx_tr = px
+            if dx_tr * dx_tr + dy_tl * dy_tl > r2 then
+                local cx = fw - r + px
+                local sx = fx - cell_x + cx
+                bb:setPixel(fx + cx, fy + py, strips.top:getPixel(sx, fy - cell_y + py))
+            end
+            local dy_bl = py
+            if dx_tl * dx_tl + dy_bl * dy_bl > r2 then
+                local cy = fh - r + py
+                local sy = (fy + cy) - (cell_y + cell_h - r)
+                local sx = fx - cell_x + px
+                bb:setPixel(fx + px, fy + cy, strips.bot:getPixel(sx, sy))
+            end
+            if dx_tr * dx_tr + dy_bl * dy_bl > r2 then
+                local cx = fw - r + px
+                local cy = fh - r + py
+                local sy = (fy + cy) - (cell_y + cell_h - r)
+                local sx = fx - cell_x + cx
+                bb:setPixel(fx + cx, fy + cy, strips.bot:getPixel(sx, sy))
+            end
+        end
+    end
+    strips.top:free()
+    strips.bot:free()
 end
 
 local function getAspectRatioAdjustedDimensions(width, height, border_size)
@@ -1006,6 +1052,16 @@ local function patchVisualOverhaul(plugin)
             return orig_BookInfoManager_getSetting(self_bim, key, ...)
         end
 
+        local wp_bg
+        if feat("wallpaper_mode") and feat("rounded_corners") and CORNER_R > 0 then
+            local r = CORNER_R
+            wp_bg = {}
+            wp_bg.top = Blitbuffer.new(self.width, r, bb:getType())
+            wp_bg.top:blitFrom(bb, 0, 0, x, y, self.width, r)
+            wp_bg.bot = Blitbuffer.new(self.width, r, bb:getType())
+            wp_bg.bot:blitFrom(bb, 0, 0, x, y + self.height - r, self.width, r)
+        end
+
         orig_paintTo(self, bb, x, y)
 
         -- Restore all originals
@@ -1068,11 +1124,15 @@ local function patchVisualOverhaul(plugin)
                 end
                 end -- feat("stacked_bars")
 
-                -- White fill from below cover to cell bottom
+                -- Fill from below cover to cell bottom
                 local fill_top = fy + frame_dimen.h
                 local fill_h = self.height - (fill_top - y)
                 if fill_h > 0 then
-                    bb:paintRect(image_x, fill_top, image_size.w, fill_h, Blitbuffer.COLOR_WHITE)
+                    if feat("wallpaper_mode") then
+                        bb:lightenRect(image_x, fill_top, image_size.w, fill_h, 0.75)
+                    else
+                        bb:paintRect(image_x, fill_top, image_size.w, fill_h, Blitbuffer.COLOR_WHITE)
+                    end
                 end
 
                 -- Dark grey border around cover
@@ -1080,7 +1140,12 @@ local function patchVisualOverhaul(plugin)
                 bb:paintBorder(image_x, image_y, image_size.w - 1, image_size.h, cover_border_w, Blitbuffer.COLOR_DARK_GRAY, 0, false)
 
                 if feat("rounded_corners") then
-                    paintCorners(bb, image_x, image_y, image_size.w, image_size.h)
+                    if feat("wallpaper_mode") and wp_bg then
+                        roundCornersFromBg(bb, wp_bg, x, y, self.height, image_x, image_y, image_size.w, image_size.h, CORNER_R)
+                        wp_bg = nil
+                    else
+                        paintCorners(bb, image_x, image_y, image_size.w, image_size.h)
+                    end
                 end
 
                 -- Folder title below cover
@@ -1101,14 +1166,21 @@ local function patchVisualOverhaul(plugin)
                     local bw = Screen:scaleBySize(focus_cfg.border_width)
                     bb:paintRect(x, y + self.height - bw, self.width, bw, focus_cfg.color)
                 end
+                if wp_bg then wp_bg.top:free(); wp_bg.bot:free(); wp_bg = nil end
                 return
             end
         end
 
         -- [covers] Book path
-        if self.is_directory or self.file_deleted then return end
+        local function freeWpBg()
+            if wp_bg then
+                wp_bg.top:free(); wp_bg.bot:free()
+                wp_bg = nil
+            end
+        end
+        if self.is_directory or self.file_deleted then freeWpBg(); return end
         local target = self._cover_frame or (self[1] and self[1][1] and self[1][1][1])
-        if not target or not target.dimen then return end
+        if not target or not target.dimen then freeWpBg(); return end
 
         local cover_area_h = self._title_widget and (self.height - title_strip_h - card_gap_px) or self.height
         local fx = x + math.floor((self.width - target.dimen.w) / 2)
@@ -1119,15 +1191,24 @@ local function patchVisualOverhaul(plugin)
         local cover_border = Screen:scaleBySize(0.5)
         bb:paintBorder(fx, fy, fw - 1, fh, cover_border, Blitbuffer.COLOR_DARK_GRAY, 0, false)
 
-        -- [card] White fill from below cover to cell bottom (gap + text area)
+        -- [card] Fill from below cover to cell bottom (gap + text area)
         if self._title_widget then
             local fill_top = y + cover_area_h
             local fill_h = self.height - cover_area_h
-            bb:paintRect(fx, fill_top, fw, fill_h, Blitbuffer.COLOR_WHITE)
+            if feat("wallpaper_mode") then
+                bb:lightenRect(fx, fill_top, fw, fill_h, 0.75)
+            else
+                bb:paintRect(fx, fill_top, fw, fill_h, Blitbuffer.COLOR_WHITE)
+            end
         end
 
         if feat("rounded_corners") then
-            paintCorners(bb, fx, fy, fw, fh)
+            if feat("wallpaper_mode") and wp_bg then
+                roundCornersFromBg(bb, wp_bg, x, y, self.height, fx, fy, fw, fh, CORNER_R)
+                wp_bg = nil
+            else
+                paintCorners(bb, fx, fy, fw, fh)
+            end
         end
 
         -- [overlays] Progress bar (hidden below MIN_PERCENT and at/above NEAR_COMPLETE_PERCENT)
@@ -1830,6 +1911,7 @@ local function patchVisualOverhaul(plugin)
                 { key = "new_badge",          text = _("New book badge") },
                 { key = "image_as_cover",     text = _("Image file as book cover"), full_refresh = true },
                 { key = "virtual_series",     text = _("Group series into virtual folders"), full_refresh = true },
+                { key = "wallpaper_mode",    text = _("Wallpaper-compatible mode"), full_refresh = true },
             }
 
             local feat_sub_items = {}

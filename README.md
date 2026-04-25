@@ -79,6 +79,7 @@ All 13 visual features can be toggled at runtime without editing Lua.
 | New book badge | On | |
 | Image file as book cover | On | Full refresh |
 | Group series into virtual folders | On | Full refresh |
+| Wallpaper-compatible mode | Off | Full refresh |
 
 Two additional folder-name settings are injected directly into "Mosaic and detailed list settings":
 - **Folder name centered** (default: on)
@@ -179,6 +180,7 @@ Compile-time defaults for each visual feature. These apply when no runtime toggl
 | `new_badge` | `true` | "New" badge on recently added unread books |
 | `virtual_series` | `true` | Auto-group books by series into virtual folders |
 | `image_as_cover` | `true` | Use same-basename images as book covers |
+| `wallpaper_mode` | `false` | Transparent backgrounds for wallpaper compatibility |
 
 </details>
 
