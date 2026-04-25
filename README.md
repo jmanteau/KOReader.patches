@@ -11,7 +11,10 @@ It is based on the work of several KOReader community contributors with bug fixe
 <p align="center">
   <img src="README.assets/image-20260301201648557.png" alt="Mosaic view screenshot">
 </p>
-![image-20260425154300326](README.assets/image-20260425154300326.png)
+
+<p align="center">
+  <img src="README.assets/image-20260425154300326.png" alt="Mosaic view screenshot">
+</p>
 
 
 ## Patches
