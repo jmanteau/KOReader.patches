@@ -11,14 +11,14 @@ It is based on the work of several KOReader community contributors with bug fixe
 <p align="center">
   <img src="README.assets/image-20260301201648557.png" alt="Mosaic view screenshot">
 </p>
-
+![image-20260425154300326](README.assets/image-20260425154300326.png)
 
 
 ## Patches
 
 ### Visual Overhaul (`2--visual-overhaul.lua`)
 
-Consolidated patch that replaces the default mosaic cover appearance. Merges the former standalone patches for stretched covers, rounded corners, folder covers, overlay badges, and automatic series grouping into a single file. Requires `2--disable-all-CB-widgets.lua` to be installed first.
+Consolidated patch that replaces the default mosaic cover appearance. Merges the former standalone patches for stretched covers, rounded corners, folder covers, overlay badges, and automatic series grouping into a single file.
 
 #### Cover rendering
 
@@ -55,9 +55,37 @@ When enabled (toggle: "Group book series into folders" in file browser settings)
   <img src="README.assets/image-20260301201030363.png" alt="Series grouping screenshot">
 </p>
 
+### Runtime feature toggles
+
+All 13 visual features can be toggled at runtime without editing Lua.
+
+**Menu path:** *File browser > Mosaic and detailed list settings > Visual features*
+
+| Toggle | Default | Notes |
+|--------|---------|-------|
+| Stretched covers (aspect ratio) | On | Full refresh on toggle |
+| Rounded corner overlays | On | |
+| Folder cover images | On | Full refresh |
+| Stacked bars above folders | On | |
+| Title strip below covers | On | Full refresh |
+| Reading progress bar | On | |
+| Percent read badge | On | |
+| Page count badge | On | |
+| Series index badge | On | Full refresh |
+| Status dogear icons | On | |
+| New book badge | On | |
+| Image file as book cover | On | Full refresh |
+| Group series into virtual folders | On | Full refresh |
+
+Two additional folder-name settings are injected directly into "Mosaic and detailed list settings":
+- **Folder name centered** (default: on)
+- **Show folder name** (default: on)
+
+Toggles are persisted via `BookInfoManager` (stored as `feat_<key>` = "Y"/"N"). Items marked "Full refresh" trigger `refreshPath()` (re-reads directory); others trigger the lighter `updateItems()`.
+
 ### Disable CoverBrowser Widgets (`2--disable-all-CB-widgets.lua`)
 
-Prerequisite patch. Suppresses the stock CoverBrowser overlay widgets (progress bar, collection star, description hint) so the visual overhaul can draw its own replacements without conflicts.
+**Deprecated -- optional.** The visual overhaul patch (`2--visual-overhaul.lua`) now suppresses stock CoverBrowser overlay widgets internally before rendering its own replacements. This standalone patch is no longer required. It is harmless if still installed but can be safely removed.
 
 ### Double-Tap to Open (`2-browser-double-tap.lua`)
 
@@ -88,9 +116,7 @@ This allow proper series detection.
 
 ### Patch load order
 
-KOReader loads patches in lexicographic order. The `2--` prefix (double dash) sorts before `2-` (single dash), ensuring prerequisite patches load first. All three patches share the `2` prefix so they load in the same priority tier after any `1-` patches.
-
- `2--disable-all-CB-widgets.lua` run **before** `2--visual-overhaul.lua`. The disable patch must load first so the overhaul has a clean canvas for its custom overlays.
+KOReader loads patches in lexicographic order. The `2--` prefix (double dash) sorts before `2-` (single dash). All patches share the `2` prefix so they load in the same priority tier after any `1-` patches. The `2--disable-all-CB-widgets.lua` patch is no longer a prerequisite but is harmless if present.
 
 For the official guide on user patches, see: <https://koreader.rocks/user_guide/#L2-userpatches>
 
@@ -129,6 +155,29 @@ The `../` navigation item takes one cover slot in mosaic view. Remove it by sett
 ## Configuration
 
 All tunables are at the top of `2--visual-overhaul.lua`.
+
+<details>
+<summary><strong>Feature toggles</strong> (<code>cfg_features</code>, line 27)</summary>
+
+Compile-time defaults for each visual feature. These apply when no runtime toggle has been saved yet. Once a feature is toggled at runtime via the settings menu, the runtime value takes precedence.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `cover_aspect_ratio` | `true` | Stretched covers with custom aspect ratio |
+| `rounded_corners` | `true` | Rounded corner overlays on covers |
+| `folder_covers` | `true` | Show cover images on folders |
+| `stacked_bars` | `true` | Stacked bars above folder covers |
+| `title_strip` | `true` | Book title + author below cover |
+| `progress_bar` | `true` | Reading progress bar on covers |
+| `percent_badge` | `true` | Percentage read badge (top-right) |
+| `pages_badge` | `true` | Page count badge (bottom-left) |
+| `series_badge` | `true` | Series index "#N" badge (top-center) |
+| `dogear` | `true` | Status dogear icons |
+| `new_badge` | `true` | "New" badge on recently added unread books |
+| `virtual_series` | `true` | Auto-group books by series into virtual folders |
+| `image_as_cover` | `true` | Use same-basename images as book covers |
+
+</details>
 
 <details>
 <summary><strong>Cover preferences</strong> (line 22)</summary>
