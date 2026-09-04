@@ -866,6 +866,10 @@ local function patchVisualOverhaul(plugin)
     end
 
     function MosaicMenuItem:_setFolderCover(img)
+        -- Defensive re-require: `_` is somehow a broken (non-callable) upvalue by
+        -- the time this method runs, see the PR description. A fresh require is
+        -- cheap (module table is cached) and keeps this call translatable.
+        local _ = require("gettext")
         local border_size = 0
         local cover_h = self.height - title_strip_h - card_gap_px
         local frame_dimen = getAspectRatioAdjustedDimensions(self.width, cover_h, border_size)
@@ -1876,6 +1880,11 @@ local function patchVisualOverhaul(plugin)
     local orig_addToMainMenu = plugin.addToMainMenu
     function plugin:addToMainMenu(menu_items)
         orig_addToMainMenu(self, menu_items)
+
+        -- Defensive re-require: `_` is somehow a broken (non-callable) upvalue by
+        -- the time this method runs, see the PR description. A fresh require is
+        -- cheap (module table is cached) and keeps every label below translatable.
+        local _ = require("gettext")
 
         -- [covers] inject folder-name settings into Mosaic submenu
         if menu_items.filebrowser_settings then
